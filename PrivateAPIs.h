@@ -54,6 +54,10 @@ extern UIApplication *UIApp;
 - (void)applicationOpenURL:(NSURL *)arg1 withApplication:(id)application sender:(id)sender publicURLsOnly:(BOOL)publicOnly animating:(BOOL)animating needsPermission:(BOOL)needsPermission activationSettings:(id)activationSettings withResult:(id)resultHandler;
 @end
 
+@interface SpringBoard (iOS10)
+- (void)applicationOpenURL:(NSURL *)arg1 withApplication:(id)application publicURLsOnly:(BOOL)publicOnly animating:(BOOL)animating needsPermission:(BOOL)needsPermission activationSettings:(id)activationSettings withResult:(id)resultHandler;
+@end
+
 @interface SBApplication : NSObject
 - (NSString *)displayIdentifier;
 @end
@@ -73,4 +77,8 @@ extern UIApplication *UIApp;
 
 @interface SBBookmarkIcon : NSObject // Not actually
 - (UIWebClip *)webClip;
+@end
+
+@interface MailAppController
+-(void)applicationOpenURL:(NSURL*)url;
 @end

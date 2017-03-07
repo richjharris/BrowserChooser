@@ -62,7 +62,10 @@ static inline BOOL BCApplySchemeReplacementForDisplayIdentifierOnURL(NSString *d
 
 static inline BOOL BCURLPassesPrefilter(NSURL *url)
 {
-	return ![url isStoreServicesURL] && ![url isWebcalURL] && ![url mapsURL] && ![url youTubeURL] && ![url gamecenterURL] && ![url appleStoreURL];
+	BOOL isYouTubeURL = [url respondsToSelector:@selector(youTubeURL)] && [url youTubeURL];
+	BOOL isGamecenterURL = [url respondsToSelector:@selector(gamecenterURL)] && [url gamecenterURL];
+
+	return ![url isStoreServicesURL] && ![url isWebcalURL] && ![url mapsURL] && !isYouTubeURL && !isGamecenterURL && ![url appleStoreURL];
 }
 
 __attribute__((visibility("hidden")))
@@ -168,7 +171,13 @@ __attribute__((visibility("hidden")))
 		NSString *displayIdentifier = [_orderedDisplayIdentifiers objectAtIndex:buttonIndex];
 		BCApplySchemeReplacementForDisplayIdentifierOnURL(displayIdentifier, adjustedURL, &adjustedURL);
 		suppressed++;
-		if ([UIApp respondsToSelector:@selector(applicationOpenURL:withApplication:sender:publicURLsOnly:animating:needsPermission:activationSettings:withResult:)]) {
+		if ([UIApp respondsToSelector:@selector(applicationOpenURL:withApplication:publicURLsOnly:animating:needsPermission:activationSettings:withResult:)]) {
+			shouldBreadcrumb++;
+			[(SpringBoard *)UIApp applicationOpenURL:adjustedURL withApplication:nil publicURLsOnly:NO animating:YES needsPermission:NO activationSettings:_objectAdditionalFlags withResult:nil];
+			dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 10), dispatch_get_main_queue(), ^{
+				shouldBreadcrumb--;
+			});
+		} else if ([UIApp respondsToSelector:@selector(applicationOpenURL:withApplication:sender:publicURLsOnly:animating:needsPermission:activationSettings:withResult:)]) {
 			shouldBreadcrumb++;
 			[(SpringBoard *)UIApp applicationOpenURL:adjustedURL withApplication:nil sender:_sender publicURLsOnly:NO animating:YES needsPermission:NO activationSettings:_objectAdditionalFlags withResult:nil];
 			dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 10), dispatch_get_main_queue(), ^{
@@ -221,7 +230,9 @@ __attribute__((visibility("hidden")))
 	UIWebClip *webClip = [self webClip];
 	NSURL *url = webClip.pageURL;
 	if (BCURLPassesPrefilter(url)) {
-		if ([UIApp respondsToSelector:@selector(applicationOpenURL:publicURLsOnly:animating:sender:additionalActivationFlag:)]) {
+		if ([UIApp respondsToSelector:@selector(applicationOpenURL:withApplication:publicURLsOnly:animating:needsPermission:activationSettings:withResult:)]) {
+			[(SpringBoard *)UIApp applicationOpenURL:url withApplication:nil publicURLsOnly:NO animating:YES needsPermission:NO activationSettings:nil withResult:nil];
+		} else if ([UIApp respondsToSelector:@selector(applicationOpenURL:publicURLsOnly:animating:sender:additionalActivationFlag:)]) {
 			[(SpringBoard *)UIApp applicationOpenURL:url publicURLsOnly:NO animating:YES sender:nil additionalActivationFlag:0];
 		} else {
 			[(SpringBoard *)UIApp applicationOpenURL:url withApplication:nil sender:nil publicURLsOnly:NO animating:YES needsPermission:NO additionalActivationFlags:nil];
@@ -342,6 +353,33 @@ static inline BCMappingApplied BCApplyMappingAndOptionallyConsumeURL(NSURL **url
 	}
 }
 
+// iOS 10
+
+- (void)_openURLCore:(NSURL *)url display:(id)display animating:(BOOL)animating activationSettings:(id)activationSettings withResult:(id)resultHandler
+{
+	switch (BCApplyMappingAndOptionallyConsumeURL(&url, &display, nil, 0, activationSettings, resultHandler)) {
+		case BCNoMappingApplied:
+			return %orig();
+		case BCMappedToUIElement:
+			return;
+		case BCMappedToNewApplication:
+			suppressed++;
+			shouldBreadcrumb++;
+			if ([self respondsToSelector:@selector(applicationOpenURL:withApplication:publicURLsOnly:animating:needsPermission:activationSettings:withResult:)]) {
+				[self applicationOpenURL:url withApplication:nil publicURLsOnly:NO animating:YES needsPermission:NO activationSettings:activationSettings withResult:nil];
+			} else if ([self respondsToSelector:@selector(applicationOpenURL:publicURLsOnly:)]) {
+				[self applicationOpenURL:url publicURLsOnly:NO];
+			} else {
+				[self openURL:url];
+			}
+			dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 10), dispatch_get_main_queue(), ^{
+				shouldBreadcrumb--;
+			});
+			suppressed--;
+			return;
+	}
+}
+
 %end
 
 %hook SBMainDisplaySceneManager
@@ -404,6 +442,23 @@ static inline BCMappingApplied BCApplyMappingAndOptionallyConsumeURL(NSURL **url
 }
 
 %end
+
+%end
+
+%hook MailAppController
+
+-(void)openURL:(NSURL*)url options:(id)options completionHandler:(/*^block*/id)resultHandler
+{
+	switch (BCApplyMappingAndOptionallyConsumeURL(&url, NULL, nil, 0, 0, resultHandler)) {
+		case BCNoMappingApplied:
+			return %orig();
+		case BCMappedToUIElement:
+			return;
+		case BCMappedToNewApplication:
+			%orig(url, options, resultHandler);
+			return;
+	}
+}
 
 %end
 
